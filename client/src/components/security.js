@@ -20,7 +20,7 @@ import {
 } from "react-icons/fa";
 import Navbar from "./navbar";
 import tt from "../images/logo.png";
-import securitybg from "../images/Key Visual 1.JPG";
+import securitybg from "../images/staffbg.jpg";
 import { useNavigate } from "react-router-dom";
 
 

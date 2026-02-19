@@ -120,6 +120,7 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
       host: firstVisitor.host,
       company: firstVisitor.company,
       purposeOfVisit: firstVisitor.purposeOfVisit,
+      guestWifiRequired: firstVisitor.guestWifiRequired,
       TentativeinTime: firstVisitor.TentativeinTime,
       TentativeoutTime: firstVisitor.TentativeoutTime,
     };
@@ -136,6 +137,7 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
       host: ssoUserName,
       company: "",
       purposeOfVisit: "",
+      guestWifiRequired: false,
       TentativeinTime: "",
       TentativeoutTime: "",
     };
@@ -263,11 +265,26 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
           >
             <div
               className="d-flex justify-content-between align-items-center mb-3"
-              onClick={() => setOpenIndex(openIndex === index ? null : index)}
             >
-              <h5 className="fw-bold mb-0 d-flex align-items-center">
+              <h5 
+                className="fw-bold mb-0 d-flex align-items-center flex-grow-1"
+                onClick={() => setOpenIndex(openIndex === index ? null : index)}
+                style={{ cursor: "pointer" }}
+              >
                 <FaUser className="me-2 text-primary" /> Visitor {index + 1}
               </h5>
+              {!visitorToEdit && visitors.length > 1 && openIndex !== index && index > 0 && (
+                <button
+                  className="btn btn-danger btn-sm"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeVisitor(index);
+                  }}
+                >
+                  Delete Entry
+                </button>
+              )}
             </div>
 
             <AnimatePresence>
@@ -480,7 +497,7 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
                         >
                           {autofillEnabled[index]
                             ? "Clear Autofill"
-                            : "Copy from previous visitor"}
+                            : "Copy from first visitor"}
                         </button>
                       )}
                       <button

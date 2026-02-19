@@ -98,7 +98,7 @@ p.tagline {
 .service-page {
   position: relative;
   min-height: 100vh;
-  background: url("./images/Key Visual 1.JPG") no-repeat center center/cover;
+  background: url("./images/staffbg.jpg") no-repeat center center/cover;
   display: flex;
   justify-content: flex-start;
   font-family:'Roboto', 'Oxygen',

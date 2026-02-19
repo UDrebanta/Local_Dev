@@ -168,8 +168,10 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
     updated[index] = {
       ...updated[index],
       host: firstGuest.host,
+      category: firstGuest.category,
       company: firstGuest.company,
       purposeOfVisit: firstGuest.purposeOfVisit,
+      guestWifiRequired: firstGuest.guestWifiRequired,
       proposedRefreshmentTime: firstGuest.proposedRefreshmentTime,
       TentativeinTime: firstGuest.TentativeinTime,
       TentativeoutTime: firstGuest.TentativeoutTime,
@@ -185,8 +187,10 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
     updated[index] = {
       ...updated[index],
       host: ssoHostName,
+      category: "Isuzu Employee",
       company: "",
       purposeOfVisit: "",
+      guestWifiRequired: false,
       proposedRefreshmentTime: "",
       TentativeinTime: "",
       TentativeoutTime: "",
@@ -331,11 +335,26 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
           >
             <div
               className="d-flex justify-content-between align-items-center mb-3"
-              onClick={() => setOpenIndex(openIndex === index ? null : index)}
             >
-              <h5 className="fw-bold mb-0 d-flex align-items-center">
+              <h5 
+                className="fw-bold mb-0 d-flex align-items-center flex-grow-1"
+                onClick={() => setOpenIndex(openIndex === index ? null : index)}
+                style={{ cursor: "pointer" }}
+              >
                 <FaUser className="me-2 text-primary" /> Guest {index + 1}
               </h5>
+              {!guestToEdit && guests.length > 1 && openIndex !== index && index > 0 && (
+                <button
+                  className="btn btn-danger btn-sm"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeGuest(index);
+                  }}
+                >
+                  Delete Entry
+                </button>
+              )}
             </div>
 
             <AnimatePresence>
@@ -560,7 +579,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
                         >
                           {autofillEnabled[index]
                             ? "Clear Autofill"
-                            : "Copy from previous guest"}
+                            : "Copy from first guest"}
                         </button>
                       )}
                       <button
