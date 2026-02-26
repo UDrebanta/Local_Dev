@@ -117,22 +117,13 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
         guestWifiRequired: guestToEdit.guestWifiRequired || false,
         refreshmentRequired: guestToEdit.refreshmentRequired || false,
         proposedRefreshmentTime: guestToEdit.proposedRefreshmentTime
-          ? (() => {
-              const dt = new Date(guestToEdit.proposedRefreshmentTime);
-              return dt.toISOString().slice(0, 16);
-            })()
+          ? new Date(guestToEdit.proposedRefreshmentTime).toISOString().slice(0, 16)
           : "",
         TentativeinTime: guestToEdit.inTime
-          ? (() => {
-              const dt = new Date(guestToEdit.inTime);
-              return dt.toISOString().slice(0, 16);
-            })()
+          ? new Date(guestToEdit.inTime).toISOString().slice(0, 16)
           : "",
         TentativeoutTime: guestToEdit.outTime
-          ? (() => {
-              const dt = new Date(guestToEdit.outTime);
-              return dt.toISOString().slice(0, 16);
-            })()
+          ? new Date(guestToEdit.outTime).toISOString().slice(0, 16)
           : "",
 
         submittedBy: ssoEmail,
@@ -163,8 +154,8 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
 
   const handleChange = (index, field, value) => {
     setGuests((prev) => {
-      const updated = prev.map((g, i) =>
-        i === index ? { ...g, [field]: value } : g
+      const updated = prev.map((item, i) =>
+        i === index ? { ...item, [field]: value } : item
       );
 
       if (index !== 0 || guestToEdit) return updated;
@@ -172,11 +163,52 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
       const autofillStateKey = getAutofillStateKeyForField(field);
       if (!autofillStateKey) return updated;
 
-      return updated.map((g, i) => {
-        if (i === 0) return g;
-        return { ...g, [field]: value };
+      return updated.map((item, i) => {
+        if (i === 0) return item;
+        return { ...item, [field]: value };
       });
     });
+  };
+
+  const toggleAutofillForFields = (index, key, fields) => {
+    const stateKey = `${index}-${key}`;
+    const shouldClear = !!autofillStates[stateKey];
+
+    setGuests((prev) => {
+      const firstEntry = prev[0] || {};
+      return prev.map((item, i) => {
+        if (i !== index) return item;
+        const updatedItem = { ...item };
+        fields.forEach((field) => {
+          updatedItem[field] = shouldClear ? "" : firstEntry[field] || "";
+        });
+        return updatedItem;
+      });
+    });
+
+    setAutofillStates((prev) => ({
+      ...prev,
+      [stateKey]: !prev[stateKey],
+    }));
+  };
+
+  const renderAutofillButton = (index, key, fields) => {
+    if (guestToEdit || guests.length <= 1 || index === 0) return null;
+    const stateKey = `${index}-${key}`;
+    const isClearMode = !!autofillStates[stateKey];
+
+    return (
+      <button
+        type="button"
+        className={`btn visitor-autofill-btn ${isClearMode ? "btn-danger" : "btn-success"}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleAutofillForFields(index, key, fields);
+        }}
+      >
+        <img src={duplicateIcon} alt="copy or clear" style={{ width: "20px", height: "20px" }} />
+      </button>
+    );
   };
 
   const addGuest = () => {
@@ -187,31 +219,19 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
   const removeGuest = (index) => {
     setGuests((prev) => prev.filter((_, i) => i !== index));
     setOpenIndex(index === 0 ? 0 : index - 1);
-  };
-
-  //  Host toggle exactly like visitor:
-  // ON  -> clear host, enable typing
-  // OFF -> reset host to logged-in user, disable typing
-  const toggleOnBehalfOf = (index) => {
-    const g = guests[index];
-    const newValue = !g.onBehalfOf;
-
-    handleChange(index, "onBehalfOf", newValue);
-
-    if (newValue) {
-      // turning ON -> clear so user can type
-      handleChange(index, "host", "");
-    } else {
-      // turning OFF -> reset to logged in
-      handleChange(index, "host", ssoHostName);
-    }
+    setAutofillStates((prev) => {
+      const next = {};
+      Object.keys(prev).forEach((k) => {
+        if (!k.startsWith(`${index}-`)) next[k] = prev[k];
+      });
+      return next;
+    });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
 
-    // Basic validation: phone length per country
     for (const g of guests) {
       const phoneCheck = validatePhoneLength(g.countryCode, g.phone);
       if (!phoneCheck.valid) {
@@ -222,41 +242,35 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
     }
 
     try {
-      const payload = guests.map((g) => {
-        // Parse "YYYY-MM-DD HH:MM" format back to ISO datetime
-        const parseDateTime = (dateTimeStr) => {
-          if (!dateTimeStr) return null;
-          return new Date(dateTimeStr.replace(" ", "T"));
-        };
+      const payload = guests.map((g) => ({
+        category: g.category,
+        firstName: g.firstName,
+        lastName: g.lastName,
+        email: g.email,
+        company: g.company,
 
-        return {
-          category: g.category,
-          firstName: g.firstName,
-          lastName: g.lastName,
-          email: g.email,
-          company: g.company,
+        //  send host + onBehalfOf
+        host: g.host,
+        onBehalfOf: g.onBehalfOf,
 
-          //  send host + onBehalfOf
-          host: g.host,
-          onBehalfOf: g.onBehalfOf,
+        countryCode: g.countryCode,
+        phone: `${g.countryCode}${g.phone}`,
 
-          countryCode: g.countryCode,
-          phone: `${g.countryCode}${g.phone}`,
+        purposeOfVisit: g.purposeOfVisit,
+        meetingRoom: g.meetingRoom,
+        meetingRoomRequired: g.meetingRoomRequired,
+        laptopSerial: g.laptopSerial,
+        guestWifiRequired: g.guestWifiRequired,
+        refreshmentRequired: g.refreshmentRequired,
+        proposedRefreshmentTime: g.proposedRefreshmentTime
+          ? new Date(g.proposedRefreshmentTime)
+          : null,
+        inTime: g.TentativeinTime ? new Date(g.TentativeinTime) : null,
+        outTime: g.TentativeoutTime ? new Date(g.TentativeoutTime) : null,
 
-          purposeOfVisit: g.purposeOfVisit,
-          meetingRoom: g.meetingRoom,
-          meetingRoomRequired: g.meetingRoomRequired,
-          laptopSerial: g.laptopSerial,
-          guestWifiRequired: g.guestWifiRequired,
-          refreshmentRequired: g.refreshmentRequired,
-          proposedRefreshmentTime: parseDateTime(g.proposedRefreshmentTime),
-          inTime: parseDateTime(g.TentativeinTime),
-          outTime: parseDateTime(g.TentativeoutTime),
-
-          submittedBy: ssoEmail,
-          status: g.status || "new",
-        };
-      });
+        submittedBy: ssoEmail,
+        status: g.status || "new",
+      }));
 
       if (guestToEdit) {
         await axios.put(
@@ -326,17 +340,18 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
             <div
               className="d-flex justify-content-between align-items-center mb-3"
             >
-              <h5 
-                className="fw-bold mb-0 d-flex align-items-center flex-grow-1"
-                onClick={() => setOpenIndex(openIndex === index ? null : index)}
+              <h5
+                className="fw-bold mb-0 d-flex align-items-center"
                 style={{ cursor: "pointer" }}
+                onClick={() => setOpenIndex(openIndex === index ? null : index)}
               >
                 <FaUser className="me-2 text-primary" /> Guest {index + 1}
               </h5>
-              {!guestToEdit && guests.length > 1 && openIndex !== index && index > 0 && (
+
+              {!guestToEdit && index > 0 && openIndex !== index && (
                 <button
-                  className="btn btn-danger btn-sm"
                   type="button"
+                  className="btn btn-outline-danger btn-sm"
                   onClick={(e) => {
                     e.stopPropagation();
                     removeGuest(index);
@@ -358,64 +373,30 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
                 >
                   {/* ✅ Host + On behalf of */}
                   <label className="fw-bold">Host</label>
-                  <div className="d-flex gap-2">
-                    <div className="d-flex gap-2 flex-grow-1">
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="Host"
-                        value={guest.host}
-                        disabled={!guest.onBehalfOf}
-                        onChange={(e) => handleChange(index, "host", e.target.value)}
-                        required
-                      />
-                      {!guestToEdit && guests.length > 1 && index > 0 && (
-                        <button
-                          className={`btn ${autofillStates[`${index}-host`] ? "btn-danger" : "btn-success"}`}
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const isAutofilled = autofillStates[`${index}-host`];
-                            if (isAutofilled) {
-                              handleChange(index, "host", "");
-                            } else {
-                              handleChange(index, "host", guests[0].host);
-                            }
-                            setAutofillStates({...autofillStates, [`${index}-host`]: !isAutofilled});
-                          }}
-                          title={autofillStates[`${index}-host`] ? "Clear" : "Copy from first guest"}
-                          style={{
-                            width: "40px",
-                            height: "40px",
-                            padding: "0",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <img
-                            src={duplicateIcon}
-                            alt="Copy"
-                            style={{ width: "20px", height: "20px" }}
-                          />
-                        </button>
-                      )}
-                    </div>
+                  <div className="d-flex gap-2 align-items-start">
+                    <input
+                      className="form-control flex-grow-1"
+                      placeholder="Host"
+                      required
+                      value={guest.host}
+                      onChange={(e) => handleChange(index, "host", e.target.value)}
+                      disabled={!guest.onBehalfOf}
+                    />
 
                     <button
                       type="button"
-                      className={`btn ${
-                        guest.onBehalfOf ? "btn-dark" : "btn-outline-dark"
-                      }`}
-                      onClick={() => toggleOnBehalfOf(index)}
+                      className="btn btn-outline-primary visitor-inline-btn"
+                      onClick={() =>
+                        handleChange(index, "onBehalfOf", !guest.onBehalfOf)
+                      }
                     >
                       On behalf of
                     </button>
+                    {renderAutofillButton(index, "host", ["host"])}
                   </div>
 
                   <label className="fw-bold">Category</label>
-                  <div className="d-flex gap-2">
+                  <div className="d-flex gap-2 align-items-center">
                     <select
                       className="form-select"
                       value={guest.category}
@@ -425,38 +406,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
                       <option value="Isuzu Employee">Isuzu Employee</option>
                       <option value="UD Employee">UD Employee</option>
                     </select>
-                    {!guestToEdit && guests.length > 1 && index > 0 && (
-                      <button
-                        className={`btn ${autofillStates[`${index}-category`] ? "btn-danger" : "btn-success"}`}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const isAutofilled = autofillStates[`${index}-category`];
-                          if (isAutofilled) {
-                            handleChange(index, "category", "Isuzu Employee");
-                          } else {
-                            handleChange(index, "category", guests[0].category);
-                          }
-                          setAutofillStates({...autofillStates, [`${index}-category`]: !isAutofilled});
-                        }}
-                        title={autofillStates[`${index}-category`] ? "Clear" : "Copy from first guest"}
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          padding: "0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                        }}
-                      >
-                        <img
-                          src={duplicateIcon}
-                          alt="Copy"
-                          style={{ width: "20px", height: "20px" }}
-                        />
-                      </button>
-                    )}
+                    {renderAutofillButton(index, "category", ["category"])}
                   </div>
 
                   <input
@@ -484,7 +434,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
                     onChange={(e) => handleChange(index, "email", e.target.value)}
                   />
 
-                  <div className="d-flex gap-2">
+                  <div className="d-flex gap-2 align-items-center">
                     <input
                       type="text"
                       className="form-control"
@@ -493,38 +443,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
                       onChange={(e) => handleChange(index, "company", e.target.value)}
                       required
                     />
-                    {!guestToEdit && guests.length > 1 && index > 0 && (
-                      <button
-                        className={`btn ${autofillStates[`${index}-company`] ? "btn-danger" : "btn-success"}`}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const isAutofilled = autofillStates[`${index}-company`];
-                          if (isAutofilled) {
-                            handleChange(index, "company", "");
-                          } else {
-                            handleChange(index, "company", guests[0].company);
-                          }
-                          setAutofillStates({...autofillStates, [`${index}-company`]: !isAutofilled});
-                        }}
-                        title={autofillStates[`${index}-company`] ? "Clear" : "Copy from first guest"}
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          padding: "0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                        }}
-                      >
-                        <img
-                          src={duplicateIcon}
-                          alt="Copy"
-                          style={{ width: "20px", height: "20px" }}
-                        />
-                      </button>
-                    )}
+                    {renderAutofillButton(index, "company", ["company"])}
                   </div>
 
                   {/* Country Code + Phone */}
@@ -553,7 +472,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
                     />
                   </div>
 
-                  <div className="d-flex gap-2">
+                  <div className="d-flex gap-2 align-items-center">
                     <input
                       type="text"
                       className="form-control"
@@ -562,38 +481,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
                       onChange={(e) => handleChange(index, "purposeOfVisit", e.target.value)}
                       required
                     />
-                    {!guestToEdit && guests.length > 1 && index > 0 && (
-                      <button
-                        className={`btn ${autofillStates[`${index}-purpose`] ? "btn-danger" : "btn-success"}`}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const isAutofilled = autofillStates[`${index}-purpose`];
-                          if (isAutofilled) {
-                            handleChange(index, "purposeOfVisit", "");
-                          } else {
-                            handleChange(index, "purposeOfVisit", guests[0].purposeOfVisit);
-                          }
-                          setAutofillStates({...autofillStates, [`${index}-purpose`]: !isAutofilled});
-                        }}
-                        title={autofillStates[`${index}-purpose`] ? "Clear" : "Copy from first guest"}
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          padding: "0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                        }}
-                      >
-                        <img
-                          src={duplicateIcon}
-                          alt="Copy"
-                          style={{ width: "20px", height: "20px" }}
-                        />
-                      </button>
-                    )}
+                    {renderAutofillButton(index, "purpose", ["purposeOfVisit"])}
                   </div>
 
                   {/* Meeting Room Required Toggle */}
@@ -667,80 +555,34 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
                   )}
 
                   <label className="fw-bold mt-3">Tentative In & Out Time</label>
-                  <div className="d-flex gap-2">
-                    <div className="d-flex gap-2 flex-grow-1">
-                      <div className="flex-grow-1">
-                        <label style={{ fontSize: "0.85rem" }} className="text-muted">In Time</label>
-                        <input
-                          type="datetime-local"
-                          className="form-control"
-                          value={guest.TentativeinTime || ""}
-                          onChange={(e) => handleChange(index, "TentativeinTime", e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div className="flex-grow-1">
-                        <label style={{ fontSize: "0.85rem" }} className="text-muted">Out Time</label>
-                        <input
-                          type="datetime-local"
-                          className="form-control"
-                          value={guest.TentativeoutTime || ""}
-                          onChange={(e) => handleChange(index, "TentativeoutTime", e.target.value)}
-                          required
-                        />
-                      </div>
+                  <div className="d-flex gap-2 align-items-center">
+                    <div className="d-flex gap-2 w-100">
+                      <input
+                        type="datetime-local"
+                        className="form-control"
+                        required
+                        value={guest.TentativeinTime}
+                        onChange={(e) => handleChange(index, "TentativeinTime", e.target.value)}
+                      />
+                      <input
+                        type="datetime-local"
+                        className="form-control"
+                        required
+                        value={guest.TentativeoutTime}
+                        onChange={(e) => handleChange(index, "TentativeoutTime", e.target.value)}
+                      />
                     </div>
-                    {!guestToEdit && guests.length > 1 && index > 0 && (
-                      <button
-                        className={`btn ${autofillStates[`${index}-times`] ? "btn-danger" : "btn-success"}`}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const isAutofilled = autofillStates[`${index}-times`];
-                          if (isAutofilled) {
-                            handleChange(index, "TentativeinTime", "");
-                            handleChange(index, "TentativeoutTime", "");
-                          } else {
-                            handleChange(index, "TentativeinTime", guests[0].TentativeinTime);
-                            handleChange(index, "TentativeoutTime", guests[0].TentativeoutTime);
-                          }
-                          setAutofillStates({...autofillStates, [`${index}-times`]: !isAutofilled});
-                        }}
-                        title={autofillStates[`${index}-times`] ? "Clear times" : "Copy times from first guest"}
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          padding: "0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                          alignSelf: "flex-end",
-                          marginBottom: "0",
-                        }}
-                      >
-                        <img
-                          src={duplicateIcon}
-                          alt="Copy"
-                          style={{ width: "20px", height: "20px" }}
-                        />
-                      </button>
-                    )}
+                    {renderAutofillButton(index, "times", ["TentativeinTime", "TentativeoutTime"])}
                   </div>
 
-                  {!guestToEdit && guests.length > 1 && (
-                    <div className="d-flex gap-2 mt-3">
-                      <button
-                        className="btn btn-danger btn-sm flex-grow-1"
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeGuest(index);
-                        }}
-                      >
-                        Delete Entry
-                      </button>
-                    </div>
+                  {!guestToEdit && index > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger w-100 mt-2"
+                      onClick={() => removeGuest(index)}
+                    >
+                      Delete Entry
+                    </button>
                   )}
 
                   <p className="text-muted mt-2 mb-0">
@@ -785,6 +627,23 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
       </form>
 
       <style>{`
+        .visitor-autofill-btn {
+          width: 38px;
+          height: 38px;
+          min-width: 38px;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .visitor-inline-btn {
+          height: 38px;
+          display: inline-flex;
+          align-items: center;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
         .wifi-toggle {
           width: 50px;
           height: 26px;

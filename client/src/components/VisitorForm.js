@@ -1,19 +1,29 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FaUser, FaWifi } from "react-icons/fa";
+import { useMsal } from "@azure/msal-react";
 import axios from "axios";
 import Swal from "sweetalert2";
 import { validatePhoneLength } from "../utils/phoneUtils";
 import duplicateIcon from "../images/duplicate.png";
 
 export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) {
-  
+  const { accounts } = useMsal();
 
   // Get SSO user info - with better fallback
-  // Temporary logged-in user (replace later with real auth)
-  const ssoUserName = localStorage.getItem("username") || "Employee User";
-  const ssoEmail = localStorage.getItem("email") || "employee@company.com";
-
+  const currentAccount = accounts[0];
+  const ssoUserName =
+    currentAccount?.name ||
+    currentAccount?.username ||
+    currentAccount?.localAccountId ||
+    "Unknown User";
+  
+    const ssoEmail =
+    currentAccount?.idTokenClaims?.preferred_username ||
+    currentAccount?.username ||
+    currentAccount?.idTokenClaims?.email ||
+    "Unknown User";
+  console.log("Logged-in user email:", ssoEmail);
 
   // Country code list (extend as needed)
   const COUNTRY_CODES = [
@@ -57,7 +67,18 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
   const [autofillStates, setAutofillStates] = useState({});
 
   // Update submittedBy + host when account changes
-  
+  useEffect(() => {
+    if (currentAccount) {
+      const userName =
+        currentAccount.name ||
+        currentAccount.username ||
+        currentAccount.localAccountId ||
+        "Unknown User";
+      setVisitors((prevVisitors) =>
+        prevVisitors.map((v) => ({ ...v, submittedBy: userName, host: userName }))
+      );
+    }
+  }, [currentAccount]);
 
   // Load edit visitor
   useEffect(() => {
@@ -68,25 +89,19 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
       const parsedCountryCode = visitorToEdit.countryCode || match?.[1] || "+91";
       const parsedPhone = match?.[2] || rawPhone; // fallback if not matching
 
-      // Parse inTime
-      const inDateTime = visitorToEdit.inTime ? new Date(visitorToEdit.inTime) : null;
-      const inDateTimeString = inDateTime
-      ? inDateTime.toISOString().slice(0, 16)
-      : "";
-
-    // Parse outTime
-    const outDateTime = visitorToEdit.outTime ? new Date(visitorToEdit.outTime) : null;
-    const outDateTimeString = outDateTime
-      ? outDateTime.toISOString().slice(0, 16)
-      : "";
-
-    setVisitors([{
+      setVisitors([
+        {
+          ...visitorToEdit,
           category: visitorToEdit.category || "Visitor",
           host: visitorToEdit.host || ssoUserName, //  keep existing host, else logged-in
           countryCode: parsedCountryCode,
           phone: parsedPhone,
-          TentativeinTime: inDateTimeString,
-          TentativeoutTime: outDateTimeString,
+          TentativeinTime: visitorToEdit.inTime
+            ? new Date(visitorToEdit.inTime).toISOString().slice(0, 16)
+            : "",
+          TentativeoutTime: visitorToEdit.outTime
+            ? new Date(visitorToEdit.outTime).toISOString().slice(0, 16)
+            : "",
           submittedBy: ssoUserName,
         },
       ]);
@@ -111,9 +126,9 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
   };
 
   const handleChange = (index, field, value) => {
-    setVisitors((prevVisitors) => {
-      const updated = prevVisitors.map((v, i) =>
-        i === index ? { ...v, [field]: value } : v
+    setVisitors((prev) => {
+      const updated = prev.map((item, i) =>
+        i === index ? { ...item, [field]: value } : item
       );
 
       if (index !== 0 || visitorToEdit) return updated;
@@ -121,11 +136,52 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
       const autofillStateKey = getAutofillStateKeyForField(field);
       if (!autofillStateKey) return updated;
 
-      return updated.map((v, i) => {
-        if (i === 0) return v;
-        return { ...v, [field]: value };
+      return updated.map((item, i) => {
+        if (i === 0) return item;
+        return { ...item, [field]: value };
       });
     });
+  };
+
+  const toggleAutofillForFields = (index, key, fields) => {
+    const stateKey = `${index}-${key}`;
+    const shouldClear = !!autofillStates[stateKey];
+
+    setVisitors((prev) => {
+      const firstEntry = prev[0] || {};
+      return prev.map((item, i) => {
+        if (i !== index) return item;
+        const updatedItem = { ...item };
+        fields.forEach((field) => {
+          updatedItem[field] = shouldClear ? "" : firstEntry[field] || "";
+        });
+        return updatedItem;
+      });
+    });
+
+    setAutofillStates((prev) => ({
+      ...prev,
+      [stateKey]: !prev[stateKey],
+    }));
+  };
+
+  const renderAutofillButton = (index, key, fields) => {
+    if (visitorToEdit || visitors.length <= 1 || index === 0) return null;
+    const stateKey = `${index}-${key}`;
+    const isClearMode = !!autofillStates[stateKey];
+
+    return (
+      <button
+        type="button"
+        className={`btn visitor-autofill-btn ${isClearMode ? "btn-danger" : "btn-success"}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleAutofillForFields(index, key, fields);
+        }}
+      >
+        <img src={duplicateIcon} alt="copy or clear" style={{ width: "20px", height: "20px" }} />
+      </button>
+    );
   };
 
   const addVisitor = () => {
@@ -137,6 +193,13 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
     const updated = visitors.filter((_, i) => i !== index);
     setVisitors(updated);
     setOpenIndex(0);
+    setAutofillStates((prev) => {
+      const next = {};
+      Object.keys(prev).forEach((k) => {
+        if (!k.startsWith(`${index}-`)) next[k] = prev[k];
+      });
+      return next;
+    });
   };
 
   const validate = () => {
@@ -174,21 +237,13 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
     setLoading(true);
 
     try {
-      const payload = visitors.map((v) => {
-        // Parse "YYYY-MM-DD HH:MM" format back to ISO datetime
-        const parseDateTime = (dateTimeStr) => {
-          if (!dateTimeStr) return null;
-          return new Date(dateTimeStr.replace(" ", "T"));
-        };
-
-        return {
-          ...v,
-          phone: `${v.countryCode}${v.phone}`,
-          inTime: parseDateTime(v.TentativeinTime),
-          outTime: parseDateTime(v.TentativeoutTime),
-          submittedBy: ssoEmail,
-        };
-      });
+      const payload = visitors.map((v) => ({
+        ...v,
+        phone: `${v.countryCode}${v.phone}`,
+        inTime: v.TentativeinTime ? new Date(v.TentativeinTime) : null,
+        outTime: v.TentativeoutTime ? new Date(v.TentativeoutTime) : null,
+        submittedBy: ssoEmail,
+      }));
 
       if (visitorToEdit) {
         await axios.put(
@@ -260,16 +315,17 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
             <div
               className="d-flex justify-content-between align-items-center mb-3"
             >
-              <h5 
-                className="fw-bold mb-0 d-flex align-items-center flex-grow-1"
-                onClick={() => setOpenIndex(openIndex === index ? null : index)}
+              <h5
+                className="fw-bold mb-0 d-flex align-items-center"
                 style={{ cursor: "pointer" }}
+                onClick={() => setOpenIndex(openIndex === index ? null : index)}
               >
                 <FaUser className="me-2 text-primary" /> Visitor {index + 1}
               </h5>
-              {!visitorToEdit && visitors.length > 1 && openIndex !== index && index > 0 && (
+
+              {!visitorToEdit && index > 0 && openIndex !== index && (
                 <button
-                  className="btn btn-danger btn-sm"
+                  className="btn btn-outline-danger btn-sm"
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -292,58 +348,25 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
                 >
                   {/*  Host field + On behalf button */}
                   <label className="fw-bold">Host</label>
-                  <div className="d-flex gap-2">
-                    <div className="d-flex gap-2 flex-grow-1">
-                      <input
-                        className="form-control"
-                        placeholder="Host"
-                        required
-                        value={visitor.host}
-                        onChange={(e) => handleChange(index, "host", e.target.value)}
-                        disabled={!visitor.onBehalfOf} // disabled by default
-                      />
-                      {!visitorToEdit && visitors.length > 1 && index > 0 && (
-                        <button
-                          className={`btn ${autofillStates[`${index}-host`] ? "btn-danger" : "btn-success"}`}
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const isAutofilled = autofillStates[`${index}-host`];
-                            if (isAutofilled) {
-                              handleChange(index, "host", "");
-                            } else {
-                              handleChange(index, "host", visitors[0].host);
-                            }
-                            setAutofillStates({...autofillStates, [`${index}-host`]: !isAutofilled});
-                          }}
-                          title={autofillStates[`${index}-host`] ? "Clear" : "Copy from first visitor"}
-                          style={{
-                            width: "40px",
-                            height: "40px",
-                            padding: "0",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <img
-                            src={duplicateIcon}
-                            alt="Copy"
-                            style={{ width: "20px", height: "20px" }}
-                          />
-                        </button>
-                      )}
-                    </div>
+                  <div className="d-flex gap-2 align-items-start">
+                    <input
+                      className="form-control flex-grow-1"
+                      placeholder="Host"
+                      required
+                      value={visitor.host}
+                      onChange={(e) => handleChange(index, "host", e.target.value)}
+                      disabled={!visitor.onBehalfOf} // disabled by default
+                    />
                     <button
                       type="button"
-                      className="btn btn-outline-primary"
+                      className="btn btn-outline-primary visitor-inline-btn"
                       onClick={() =>
                         handleChange(index, "onBehalfOf", !visitor.onBehalfOf)
                       }
                     >
                       On behalf of
                     </button>
+                    {renderAutofillButton(index, "host", ["host"])}
                   </div>
 
                   {errors.host && (
@@ -383,7 +406,7 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
                     }
                   />
 
-                  <div className="d-flex gap-2">
+                  <div className="d-flex gap-2 align-items-center">
                     <input
                       className="form-control"
                       placeholder="Company"
@@ -393,38 +416,7 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
                         handleChange(index, "company", e.target.value)
                       }
                     />
-                    {!visitorToEdit && visitors.length > 1 && index > 0 && (
-                      <button
-                        className={`btn ${autofillStates[`${index}-company`] ? "btn-danger" : "btn-success"}`}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const isAutofilled = autofillStates[`${index}-company`];
-                          if (isAutofilled) {
-                            handleChange(index, "company", "");
-                          } else {
-                            handleChange(index, "company", visitors[0].company);
-                          }
-                          setAutofillStates({...autofillStates, [`${index}-company`]: !isAutofilled});
-                        }}
-                        title={autofillStates[`${index}-company`] ? "Clear" : "Copy from first visitor"}
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          padding: "0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                        }}
-                      >
-                        <img
-                          src={duplicateIcon}
-                          alt="Copy"
-                          style={{ width: "20px", height: "20px" }}
-                        />
-                      </button>
-                    )}
+                    {renderAutofillButton(index, "company", ["company"])}
                   </div>
 
                   {/*  Country Code + Phone */}
@@ -462,7 +454,7 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
                     </p>
                   )}
 
-                  <div className="d-flex gap-2">
+                  <div className="d-flex gap-2 align-items-center">
                     <input
                       className="form-control"
                       placeholder="Purpose of Visit"
@@ -472,38 +464,7 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
                         handleChange(index, "purposeOfVisit", e.target.value)
                       }
                     />
-                    {!visitorToEdit && visitors.length > 1 && index > 0 && (
-                      <button
-                        className={`btn ${autofillStates[`${index}-purpose`] ? "btn-danger" : "btn-success"}`}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const isAutofilled = autofillStates[`${index}-purpose`];
-                          if (isAutofilled) {
-                            handleChange(index, "purposeOfVisit", "");
-                          } else {
-                            handleChange(index, "purposeOfVisit", visitors[0].purposeOfVisit);
-                          }
-                          setAutofillStates({...autofillStates, [`${index}-purpose`]: !isAutofilled});
-                        }}
-                        title={autofillStates[`${index}-purpose`] ? "Clear" : "Copy from first visitor"}
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          padding: "0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                        }}
-                      >
-                        <img
-                          src={duplicateIcon}
-                          alt="Copy"
-                          style={{ width: "20px", height: "20px" }}
-                        />
-                      </button>
-                    )}
+                    {renderAutofillButton(index, "purpose", ["purposeOfVisit"])}
                   </div>
 
                   <input
@@ -551,84 +512,38 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
                   </div>
 
                   <label className="fw-bold mt-3">Tentative In & Out Time</label>
-                  <div className="d-flex gap-2">
-                    <div className="d-flex gap-2 flex-grow-1">
-                      <div className="flex-grow-1">
-                        <label style={{ fontSize: "0.85rem" }} className="text-muted">In Time</label>
-                        <input
-                          type="datetime-local"
-                          className="form-control"
-                          value={visitor.TentativeinTime}
-                          onChange={(e) =>
-                            handleChange(index, "TentativeinTime", e.target.value)
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="flex-grow-1">
-                        <label style={{ fontSize: "0.85rem" }} className="text-muted">Out Time</label>
-                        <input
-                          type="datetime-local"
-                          className="form-control"
-                          value={visitor.TentativeoutTime}
-                          onChange={(e) =>
-                            handleChange(index, "TentativeoutTime", e.target.value)
-                          }
-                          required
-                        />
-                      </div>
+                  <div className="d-flex gap-2 align-items-center">
+                    <div className="d-flex gap-2 w-100">
+                      <input
+                        type="datetime-local"
+                        className="form-control"
+                        required
+                        value={visitor.TentativeinTime}
+                        onChange={(e) =>
+                          handleChange(index, "TentativeinTime", e.target.value)
+                        }
+                      />
+                      <input
+                        type="datetime-local"
+                        className="form-control"
+                        required
+                        value={visitor.TentativeoutTime}
+                        onChange={(e) =>
+                          handleChange(index, "TentativeoutTime", e.target.value)
+                        }
+                      />
                     </div>
-                    {!visitorToEdit && visitors.length > 1 && index > 0 && (
-                      <button
-                        className={`btn ${autofillStates[`${index}-times`] ? "btn-danger" : "btn-success"}`}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const isAutofilled = autofillStates[`${index}-times`];
-                          if (isAutofilled) {
-                            handleChange(index, "TentativeinTime", "");
-                            handleChange(index, "TentativeoutTime", "");
-                          } else {
-                            handleChange(index, "TentativeinTime", visitors[0].TentativeinTime);
-                            handleChange(index, "TentativeoutTime", visitors[0].TentativeoutTime);
-                          }
-                          setAutofillStates({...autofillStates, [`${index}-times`]: !isAutofilled});
-                        }}
-                        title={autofillStates[`${index}-times`] ? "Clear times" : "Copy times from first visitor"}
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          padding: "0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                          alignSelf: "flex-end",
-                          marginBottom: "0",
-                        }}
-                      >
-                        <img
-                          src={duplicateIcon}
-                          alt="Copy"
-                          style={{ width: "20px", height: "20px" }}
-                        />
-                      </button>
-                    )}
+                    {renderAutofillButton(index, "times", ["TentativeinTime", "TentativeoutTime"])}
                   </div>
 
-                  {!visitorToEdit && visitors.length > 1 && (
-                    <div className="d-flex gap-2 mt-3">
-                      <button
-                        className="btn btn-danger btn-sm flex-grow-1"
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeVisitor(index);
-                        }}
-                      >
-                        Delete Entry
-                      </button>
-                    </div>
+                  {!visitorToEdit && index > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger w-100 mt-2"
+                      onClick={() => removeVisitor(index)}
+                    >
+                      Delete Entry
+                    </button>
                   )}
 
                   <p className="text-muted mt-2 mb-0">
@@ -673,6 +588,23 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
       </form>
 
       <style>{`
+        .visitor-autofill-btn {
+          width: 38px;
+          height: 38px;
+          min-width: 38px;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .visitor-inline-btn {
+          height: 38px;
+          display: inline-flex;
+          align-items: center;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
         .wifi-toggle {
           width: 50px;
           height: 26px;

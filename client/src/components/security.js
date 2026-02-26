@@ -3,8 +3,7 @@ import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
 import CryptoJS from "crypto-js";
-import ExcelJS from "exceljs";
-import { saveAs } from "file-saver";
+import * as XLSX from "xlsx";
 import {
   FaClock,
   FaUser,
@@ -27,10 +26,10 @@ import { useNavigate } from "react-router-dom";
 
 const ENCRYPTION_KEY = process.env.REACT_APP_SIGNATURE_KEY || "your-secure-32-character-key!!";
 
-/*if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) {
+if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) {
   console.error("❌ SIGNATURE KEY ERROR: Key missing or weak");
   alert("SIGNATURE KEY ERROR: Missing or invalid signature key");
-}*/
+}
 
 const encryptSignature = (signatureData) => {
   try {
@@ -75,10 +74,9 @@ const isOverdue24Hours = (v) => {
   return Date.now() > inMs + 24 * 60 * 60 * 1000;
 };
 
-// ✅ NEW: check if checkout time is older than 1 week
 const isCheckoutOlderThanWeek = (v) => {
   const checkoutTime = v.actualOutTime || v.outTime;
-  if (!checkoutTime) return false; // No checkout = not older than 1 week
+  if (!checkoutTime) return false;
   const checkoutMs = new Date(checkoutTime).getTime();
   const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
   return Date.now() - checkoutMs > oneWeekMs;
@@ -143,13 +141,16 @@ export default function Security() {
 
     if (searchQuery.trim() !== "") {
       const query = searchQuery.toLowerCase();
-      const searchFilter = (v) => {
+      result = result.filter((v) => {
         const fullName = `${v.firstName || ""} ${v.lastName || ""}`.toLowerCase();
         const company = (v.company || "").toLowerCase();
         return fullName.includes(query) || company.includes(query);
-      };
-      result = result.filter(searchFilter);
-      exportResult = exportResult.filter(searchFilter);
+      });
+      exportResult = exportResult.filter((v) => {
+        const fullName = `${v.firstName || ""} ${v.lastName || ""}`.toLowerCase();
+        const company = (v.company || "").toLowerCase();
+        return fullName.includes(query) || company.includes(query);
+      });
     }
 
     let appliedFrom = dateFrom;
@@ -180,19 +181,25 @@ export default function Security() {
       const fromDate = appliedFrom ? new Date(appliedFrom + "T00:00:00") : null;
       const toDateObj = appliedTo ? new Date(appliedTo + "T23:59:59.999") : null;
 
-      const dateFilter = (v) => {
+      result = result.filter((v) => {
         const checkIn = v.actualInTime || v.inTime;
         if (!checkIn) return false;
         const checkDate = new Date(checkIn);
         if (fromDate && checkDate < fromDate) return false;
         if (toDateObj && checkDate > toDateObj) return false;
         return true;
-      };
-      result = result.filter(dateFilter);
-      exportResult = exportResult.filter(dateFilter);
+      });
+
+      exportResult = exportResult.filter((v) => {
+        const checkIn = v.actualInTime || v.inTime;
+        if (!checkIn) return false;
+        const checkDate = new Date(checkIn);
+        if (fromDate && checkDate < fromDate) return false;
+        if (toDateObj && checkDate > toDateObj) return false;
+        return true;
+      });
     }
 
-    // ✅ NEW: Filter out checkout data older than 1 week from UI display ONLY
     result = result.filter((v) => !isCheckoutOlderThanWeek(v));
 
     setFilteredVisitors(result);
@@ -546,7 +553,7 @@ const getConsentLabel = (v) => {
 };
 
 
-  const exportToExcel = async () => {
+  const exportToExcel = () => {
     const exportData = exportFilteredVisitors.map((v) => ({
       "First Name": v.firstName || "",
       "Last Name": v.lastName || "",
@@ -563,37 +570,12 @@ const getConsentLabel = (v) => {
       Signed: v.displaySignature ? "Yes" : "No",
     }));
 
-    // Create Excel workbook
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("Visitors");
-    
-    // Add headers
-    const headers = Object.keys(exportData[0]);
-    worksheet.columns = headers.map(header => ({
-      header: header,
-      key: header,
-      width: 15
-    }));
-    
-    // Style header row
-    worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-    worksheet.getRow(1).fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF4472C4" }
-    };
-    
-    // Add data rows
-    exportData.forEach(row => {
-      worksheet.addRow(row);
-    });
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Visitors");
 
     const fileName = `Visitors_${new Date().toISOString().split("T")[0]}.xlsx`;
-    
-    // For browser: use writeBuffer and file-saver
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, fileName);
+    XLSX.writeFile(workbook, fileName);
 
     Swal.fire({
       icon: "success",
